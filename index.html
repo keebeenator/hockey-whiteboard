@@ -172,7 +172,8 @@ function drawRink(){
   el('path', { d:outline, fill:'#ffffff' }, g);
   const c = el('g', { 'clip-path':'url(#rinkClip)' }, g);
   const hw = RINK.W/2;
-  // Center-ice logo: painted "under the ice", beneath every line and all objects/strokes
+  // Center-ice logo: painted "under the ice" in rink coordinates (upright in full landscape view);
+  // it turns with the rink like the lines do. Beneath every line and all objects/strokes.
   const logo = el('image', { id:'centerLogo', href:CENTER_LOGO, x:-LOGO_R, y:-LOGO_R, width:2*LOGO_R, height:2*LOGO_R,
     opacity:0.88, preserveAspectRatio:'xMidYMid meet', 'pointer-events':'none' }, c);
   logo.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', CENTER_LOGO);
@@ -236,7 +237,6 @@ function updateView(){
   if (mode === 'half') { if (end === 'right') { x0 = -3; } else { x1 = 3; } }
   curRegion = { x0:x0-m, x1:x1+m, y0:-42.5-m, y1:42.5+m };
   world.setAttribute('transform', `rotate(${curRot})`);
-  const logoEl = $('centerLogo'); if (logoEl) logoEl.setAttribute('transform', `rotate(${-curRot})`);  // keep logo upright
   const vr = $('viewClipRect');
   vr.setAttribute('x', curRegion.x0); vr.setAttribute('y', curRegion.y0);
   vr.setAttribute('width', curRegion.x1-curRegion.x0); vr.setAttribute('height', curRegion.y1-curRegion.y0);
