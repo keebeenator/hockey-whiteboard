@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#111827">
+<title>Hockey Whiteboard</title>
+<style>
+  :root { --bar:#111827; --btn:#1f2937; --btn-active:#2563eb; --txt:#e5e7eb; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; overflow:hidden; background:#d1d5db; overscroll-behavior:none;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; touch-action:none;
+    -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  #app { position:fixed; inset:0; display:flex; flex-direction:column; }
+  #board { position:relative; flex:1 1 auto; min-height:0; }
+  #svg { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  #toolbar { flex:0 0 auto; background:var(--bar); display:flex; flex-wrap:wrap; gap:4px;
+    padding:4px 4px calc(4px + env(safe-area-inset-bottom)); }
+  #toolbar .grp { display:flex; gap:4px; flex:1 1 auto; }
+  #toolbar button { flex:1 1 0; min-width:0; height:52px; border:0; border-radius:10px; background:var(--btn);
+    color:var(--txt); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+    font-size:10px; font-weight:600; letter-spacing:.2px; padding:0; cursor:pointer; touch-action:manipulation; }
+  #toolbar button svg { width:24px; height:24px; }
+  #toolbar button.active { background:var(--btn-active); color:#fff; }
+  #toolbar button:disabled { opacity:.35; }
+  #toolbar button.trash-hot { background:#dc2626; color:#fff; }
+  #toolbar .sep { width:2px; background:#374151; border-radius:1px; margin:6px 0; flex:0 0 2px; }
+  /* portrait: two rows (tools / actions) */
+  @media (orientation:portrait) { #toolbar { flex-direction:column; } #toolbar .sep { display:none; } }
+  @media (orientation:landscape) { #toolbar button { height:48px; } }
+  #penbar { position:absolute; top:8px; left:50%; transform:translateX(-50%); display:none; gap:6px; align-items:center;
+    background:rgba(17,24,39,.88); padding:6px 8px; border-radius:24px; z-index:5; box-shadow:0 2px 8px rgba(0,0,0,.25); }
+  #penbar.show { display:flex; }
+  .sw { width:32px; height:32px; border-radius:50%; border:3px solid transparent; padding:0; cursor:pointer; touch-action:manipulation; }
+  .sw.sel { border-color:#fff; box-shadow:0 0 0 2px #2563eb; }
+  .wd { width:34px; height:34px; border-radius:50%; border:0; background:#374151; display:flex; align-items:center; justify-content:center; padding:0; cursor:pointer; }
+  .wd.sel { background:#2563eb; }
+  .wd i { display:block; background:#fff; border-radius:50%; }
+  #penbar .div { width:1px; height:26px; background:#4b5563; }
+  #picker { position:absolute; display:none; gap:6px; background:#fff; padding:8px; border-radius:26px; z-index:10;
+    box-shadow:0 4px 16px rgba(0,0,0,.3); }
+  #picker.show { display:flex; }
+  #picker .sw { width:36px; height:36px; }
+  #picker .sw.sel { border-color:#111; box-shadow:none; }
+  #toast { position:absolute; bottom:10px; left:50%; transform:translateX(-50%); background:rgba(17,24,39,.85); color:#fff;
+    padding:6px 12px; border-radius:14px; font-size:13px; opacity:0; transition:opacity .25s; pointer-events:none; z-index:6; white-space:nowrap; }
+  #toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="board">
+    <svg id="svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <clipPath id="rinkClip" clipPathUnits="userSpaceOnUse"><path id="rinkClipPath"/></clipPath>
+        <clipPath id="viewClip" clipPathUnits="userSpaceOnUse"><rect id="viewClipRect"/></clipPath>
+      </defs>
+      <g id="world">
+        <g id="viewLayer" clip-path="url(#viewClip)">
+          <g id="rinkLayer"></g>
+          <g id="strokeLayer" clip-path="url(#rinkClip)"></g>
+          <g id="objLayer"></g>
+        </g>
+      </g>
+    </svg>
+    <div id="penbar"></div>
+    <div id="picker"></div>
+    <div id="toast"></div>
+  </div>
+  <div id="toolbar">
+    <div class="grp" id="tools">
+      <button data-tool="select" title="Select / move"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 8-6 1.5 3.5 6.5-2.6 1.4-3.5-6.6L5 18z"/></svg><span>Move</span></button>
+      <button data-tool="X" title="Place X player"><svg viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="3.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg><span>X</span></button>
+      <button data-tool="O" title="Place O player"><svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="3.2"><circle cx="12" cy="12" r="7"/></svg><span>O</span></button>
+      <button data-tool="puck" title="Place puck"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="14" rx="8" ry="4" fill="#e5e7eb"/><ellipse cx="12" cy="11" rx="8" ry="4" fill="#9ca3af"/></svg><span>Puck</span></button>
+      <button data-tool="pen" title="Marker pen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 20l1-5L16 4l4 4L9 19z"/><path d="M14 6l4 4"/></svg><span>Marker</span></button>
+      <button data-tool="eraser" title="Eraser (tap or swipe strokes)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 16l9-9 7 7-6 6H7z"/><path d="M8 11l7 7M13 20h8"/></svg><span>Eraser</span></button>
+      <button data-tool="delete" id="btn-delete" title="Delete: tap an item, or drag an item here"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg><span>Delete</span></button>
+    </div>
+    <div class="sep"></div>
+    <div class="grp" id="actions">
+      <button id="btn-undo" title="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg><span>Undo</span></button>
+      <button id="btn-redo" title="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 000 12h3"/></svg><span>Redo</span></button>
+      <button id="btn-view" title="Toggle full / half rink"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="4"/><path d="M12 6v12"/></svg><span id="lbl-view">Half</span></button>
+      <button id="btn-end" title="Switch which half is shown"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4L3 8l4 4M3 8h14M17 12l4 4-4 4M21 16H7"/></svg><span>Other end</span></button>
+      <button id="btn-clear" title="Clear all"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9l6 6M15 9l-6 6"/></svg><span>Clear all</span></button>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+'use strict';
+/* ======================================================================
+   DATA MODEL (all positions in rink feet; origin = center ice,
+   x: -100 (left end boards) .. +100 (right end boards), y: -42.5 .. +42.5)
+   board = {
+     version: 1,
+     objects: [ {id, type:'player', team:'X'|'O', color, x, y},
+                {id, type:'puck', x, y} ],
+     strokes: [ {id, color, width, points:[[x,y],...]} ]
+   }
+   Future playbook: { plays:[ { name, frames:[ board-like snapshots + duration ] } ] }
+   ====================================================================== */
+const STORE_KEY = 'hockeyWhiteboard.board.v1';
+const SETTINGS_KEY = 'hockeyWhiteboard.settings.v1';
+const NS = 'http://www.w3.org/2000/svg';
+const COLORS = { black:'#111111', blue:'#1d4ed8', red:'#dc2626', green:'#16a34a', orange:'#f97316' };
+const COLOR_ORDER = ['black','blue','red','green','orange'];
+const TEAM_DEFAULT = { X:'red', O:'blue' };
+const WIDTHS = [0.45, 0.85, 1.5];      // stroke widths in feet
+const RINK = { L:200, W:85, R:28, goal:89, blue:25.5, dotX:69, dotY:22, nzX:20 };
+const LONG_PRESS_MS = 500, MOVE_TOL_PX = 8;
+
+const $ = id => document.getElementById(id);
+const svg = $('svg'), world = $('world'), rinkLayer = $('rinkLayer'),
+      strokeLayer = $('strokeLayer'), objLayer = $('objLayer');
+
+const emptyBoard = () => ({ version:1, objects:[], strokes:[] });
+let board = loadBoard();
+let settings = Object.assign({ tool:'select', penColor:'black', penWidth:1, end:'right' }, loadJSON(SETTINGS_KEY) || {});
+let viewOverride = null;   // null = auto (orientation), else 'full' | 'half'
+let lastPortrait = isPortrait();
+const undoStack = [], redoStack = [];
+
+function loadJSON(k){ try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; } }
+function loadBoard(){
+  const b = loadJSON(STORE_KEY);
+  if (b && Array.isArray(b.objects) && Array.isArray(b.strokes)) return b;
+  return emptyBoard();
+}
+function save(){
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(board)); localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch(e){}
+}
+const uid = () => Math.random().toString(36).slice(2,9) + Date.now().toString(36).slice(-4);
+const snap = () => JSON.stringify(board);
+const r2 = v => Math.round(v*100)/100;
+
+/* ---------- history (snapshot based: covers every action) ---------- */
+function commit(before){   // call AFTER mutating, with snapshot taken BEFORE
+  if (before === snap()) return;
+  undoStack.push(before); if (undoStack.length > 300) undoStack.shift();
+  redoStack.length = 0; save(); updateButtons();
+}
+function undo(){ if(!undoStack.length) return; redoStack.push(snap()); board = JSON.parse(undoStack.pop()); afterHistory(); }
+function redo(){ if(!redoStack.length) return; undoStack.push(snap()); board = JSON.parse(redoStack.pop()); afterHistory(); }
+function afterHistory(){ closePicker(); renderStrokes(); renderObjects(); save(); updateButtons(); }
+
+/* ---------- SVG helpers ---------- */
+function el(tag, attrs, parent){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function rinkOutlinePath(){
+  const hl = RINK.L/2, hw = RINK.W/2, r = RINK.R;
+  return `M${-hl+r},${-hw} H${hl-r} A${r},${r} 0 0 1 ${hl},${-hw+r} V${hw-r} A${r},${r} 0 0 1 ${hl-r},${hw} H${-hl+r} A${r},${r} 0 0 1 ${-hl},${hw-r} V${-hw+r} A${r},${r} 0 0 1 ${-hl+r},${-hw} Z`;
+}
+
+/* ---------- Rink (NHL dimensions, feet) ---------- */
+function drawRink(){
+  const RED='#d42a2a', BLUE='#1f56c9', CREASE='#b9dcf7', LINE='#1f2937';
+  const g = rinkLayer; g.textContent='';
+  const outline = rinkOutlinePath();
+  $('rinkClipPath').setAttribute('d', outline);
+  el('path', { d:outline, fill:'#ffffff' }, g);
+  const c = el('g', { 'clip-path':'url(#rinkClip)' }, g);
+  const hw = RINK.W/2;
+  // Trapezoids behind nets (22 ft at goal line, 28 ft at end boards)
+  for (const s of [1,-1]) {
+    el('path', { d:`M${s*RINK.goal},-11 L${s*100},-14 M${s*RINK.goal},11 L${s*100},14`, stroke:RED, 'stroke-width':0.17, fill:'none' }, c);
+  }
+  // Goal creases (6 ft radius, 8 ft wide, straight sides 4.5 ft)
+  for (const s of [1,-1]) {
+    const gx = s*RINK.goal, sx = gx - s*Math.sqrt(36-16);
+    el('path', { d:`M${gx},-4 L${sx},-4 A6,6 0 0 ${s>0?0:1} ${sx},4 L${gx},4 Z`, fill:CREASE, stroke:RED, 'stroke-width':0.17 }, c);
+  }
+  // Goal lines (2 in)
+  for (const s of [1,-1]) el('line', { x1:s*RINK.goal, y1:-hw, x2:s*RINK.goal, y2:hw, stroke:RED, 'stroke-width':0.17 }, c);
+  // Blue lines (12 in) and red center line (12 in)
+  for (const s of [1,-1]) el('rect', { x:s*RINK.blue-0.5, y:-hw, width:1, height:RINK.W, fill:BLUE }, c);
+  el('rect', { x:-0.5, y:-hw, width:1, height:RINK.W, fill:RED }, c);
+  // Center circle (15 ft) + center dot (12 in, blue)
+  el('circle', { cx:0, cy:0, r:15, fill:'none', stroke:BLUE, 'stroke-width':0.17 }, c);
+  el('circle', { cx:0, cy:0, r:0.5, fill:BLUE }, c);
+  // Referee crease (10 ft radius) at the scorer's side boards
+  el('path', { d:`M-10,${hw} A10,10 0 0 1 10,${hw}`, fill:'none', stroke:RED, 'stroke-width':0.17 }, c);
+  // End-zone faceoff circles (15 ft) with dots, hash marks and L marks
+  for (const sx of [1,-1]) for (const sy of [1,-1]) {
+    const cx = sx*RINK.dotX, cy = sy*RINK.dotY;
+    el('circle', { cx, cy, r:15, fill:'none', stroke:RED, 'stroke-width':0.17 }, c);
+    el('circle', { cx, cy, r:1, fill:RED }, c);
+    const hx = 2.79, edge = Math.sqrt(225 - hx*hx);
+    let d = '';
+    for (const dx of [-hx, hx]) for (const dy of [-1,1]) d += `M${cx+dx},${cy+dy*edge} V${cy+dy*(edge+2)} `;
+    // L marks: 3 ft parallel to goal line, 4 ft parallel to boards, 2 ft / 9 in from dot center
+    for (const dx of [-1,1]) for (const dy of [-1,1]) {
+      const x0 = cx+dx*2, y0 = cy+dy*0.75;
+      d += `M${x0},${cy+dy*3.75} V${y0} H${cx+dx*6} `;
+    }
+    el('path', { d, stroke:RED, 'stroke-width':0.17, fill:'none' }, c);
+  }
+  // Neutral-zone dots (5 ft inside blue lines)
+  for (const sx of [1,-1]) for (const sy of [1,-1]) el('circle', { cx:sx*RINK.nzX, cy:sy*RINK.dotY, r:1, fill:RED }, c);
+  // Nets: 6 ft wide, 40 in deep
+  for (const s of [1,-1]) {
+    const gx = s*RINK.goal, bx = gx + s*3.33, mx = gx + s*1.6;
+    el('path', { d:`M${gx},-3 L${mx},-3 Q${bx},-3 ${bx},-1.4 L${bx},1.4 Q${bx},3 ${mx},3 L${gx},3`,
+      fill:'#e5e7eb', stroke:RED, 'stroke-width':0.35, 'stroke-linejoin':'round' }, c);
+  }
+  // Boards
+  el('path', { d:outline, fill:'none', stroke:LINE, 'stroke-width':0.8 }, g);
+}
+
+/* ---------- View (full / half, rotation for portrait) ---------- */
+function isPortrait(){ return window.innerHeight > window.innerWidth; }
+function viewMode(){ return viewOverride || (isPortrait() ? 'half' : 'full'); }
+let curRot = 0, curRegion = null;
+function updateView(){
+  const portrait = isPortrait(), mode = viewMode();
+  const end = settings.end;
+  // rotation: portrait -> rink vertical. Right end on top: rotate(-90); left end on top: rotate(90)
+  curRot = portrait ? (mode === 'half' && end === 'left' ? 90 : -90) : 0;
+  const m = 1.5;
+  let x0 = -100, x1 = 100;
+  if (mode === 'half') { if (end === 'right') { x0 = -3; } else { x1 = 3; } }
+  curRegion = { x0:x0-m, x1:x1+m, y0:-42.5-m, y1:42.5+m };
+  world.setAttribute('transform', `rotate(${curRot})`);
+  const vr = $('viewClipRect');
+  vr.setAttribute('x', curRegion.x0); vr.setAttribute('y', curRegion.y0);
+  vr.setAttribute('width', curRegion.x1-curRegion.x0); vr.setAttribute('height', curRegion.y1-curRegion.y0);
+  // bbox of region in rotated (view) space
+  const pts = [[curRegion.x0,curRegion.y0],[curRegion.x1,curRegion.y0],[curRegion.x0,curRegion.y1],[curRegion.x1,curRegion.y1]].map(p => rotPt(p, curRot));
+  const xs = pts.map(p=>p[0]), ys = pts.map(p=>p[1]);
+  const vx = Math.min(...xs), vy = Math.min(...ys);
+  svg.setAttribute('viewBox', `${vx} ${vy} ${Math.max(...xs)-vx} ${Math.max(...ys)-vy}`);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  document.body.dataset.view = mode; document.body.dataset.end = end; document.body.dataset.orient = portrait ? 'portrait' : 'landscape';
+  $('lbl-view').textContent = mode === 'full' ? 'Half' : 'Full';
+  $('btn-end').disabled = mode === 'full';
+  closePicker();
+  renderObjects();  // counter-rotate labels
+}
+function rotPt([x,y], deg){
+  const a = deg*Math.PI/180, c = Math.round(Math.cos(a)), s = Math.round(Math.sin(a));
+  return [x*c - y*s, x*s + y*c];
+}
+
+/* ---------- Rendering ---------- */
+function strokeD(pts){
+  if (pts.length === 1) return `M${pts[0][0]},${pts[0][1]} l0.01,0`;
+  if (pts.length === 2) return `M${pts[0][0]},${pts[0][1]} L${pts[1][0]},${pts[1][1]}`;
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 1; i < pts.length-1; i++) {
+    const mx = (pts[i][0]+pts[i+1][0])/2, my = (pts[i][1]+pts[i+1][1])/2;
+    d += ` Q${pts[i][0]},${pts[i][1]} ${r2(mx)},${r2(my)}`;
+  }
+  const l = pts[pts.length-1];
+  return d + ` L${l[0]},${l[1]}`;
+}
+function strokeEl(s){
+  return el('path', { d:strokeD(s.points), fill:'none', stroke:COLORS[s.color]||s.color, 'stroke-width':s.width,
+    'stroke-linecap':'round', 'stroke-linejoin':'round', 'data-id':s.id });
+}
+function renderStrokes(){
+  strokeLayer.textContent = '';
+  for (const s of board.strokes) strokeLayer.appendChild(strokeEl(s));
+}
+function renderObjects(){
+  objLayer.textContent = '';
+  for (const o of board.objects) {
+    const g = el('g', { transform:`translate(${o.x} ${o.y}) rotate(${-curRot})`, 'data-id':o.id, class:'obj '+o.type }, objLayer);
+    if (o.type === 'player') {
+      const col = COLORS[o.color] || o.color;
+      el('circle', { r:2.7, fill:'#fff', 'fill-opacity':0.75 }, g);
+      if (o.team === 'X') {
+        el('path', { d:'M-1.7,-1.7 L1.7,1.7 M1.7,-1.7 L-1.7,1.7', stroke:'#fff', 'stroke-width':1.6, 'stroke-linecap':'round' }, g);
+        el('path', { d:'M-1.7,-1.7 L1.7,1.7 M1.7,-1.7 L-1.7,1.7', stroke:col, 'stroke-width':0.9, 'stroke-linecap':'round' }, g);
+      } else {
+        el('circle', { r:1.85, fill:'none', stroke:'#fff', 'stroke-width':1.6 }, g);
+        el('circle', { r:1.85, fill:'none', stroke:col, 'stroke-width':0.9 }, g);
+      }
+    } else if (o.type === 'puck') {
+      el('circle', { r:1.35, fill:'#111', stroke:'#fff', 'stroke-width':0.3 }, g);
+      el('circle', { r:0.8, fill:'none', stroke:'#444', 'stroke-width':0.15 }, g);
+    }
+    if (drag && drag.obj && drag.obj.id === o.id && drag.moved) g.setAttribute('opacity', 0.75);
+  }
+}
+
+/* ---------- Geometry / hit testing ---------- */
+function ctm(){ return world.getScreenCTM(); }
+function toRink(cx, cy){
+  const p = svg.createSVGPoint(); p.x = cx; p.y = cy;
+  const q = p.matrixTransform(ctm().inverse());
+  return [q.x, q.y];
+}
+function toScreen(x, y){
+  const p = svg.createSVGPoint(); p.x = x; p.y = y;
+  const q = p.matrixTransform(ctm()); return [q.x, q.y];
+}
+function pxPerFt(){ const m = ctm(); return Math.hypot(m.a, m.b) || 1; }
+function inView([x,y]){ const r = curRegion; return x>=r.x0 && x<=r.x1 && y>=r.y0 && y<=r.y1; }
+function hitObject(p){
+  const tol = Math.max(3.2, 24/pxPerFt());
+  let best = null, bd = Infinity;
+  for (let i = board.objects.length-1; i >= 0; i--) {
+    const o = board.objects[i]; if (!inView([o.x,o.y])) continue;
+    const d = Math.hypot(o.x-p[0], o.y-p[1]);
+    if (d < tol && d < bd - 0.01) { best = o; bd = d; }
+  }
+  return best;
+}
+function segDist(p, a, b){
+  const dx=b[0]-a[0], dy=b[1]-a[1], L=dx*dx+dy*dy;
+  let t = L ? ((p[0]-a[0])*dx+(p[1]-a[1])*dy)/L : 0; t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p[0]-a[0]-t*dx, p[1]-a[1]-t*dy);
+}
+function strokeHit(s, p, r){
+  const pts = s.points;
+  if (pts.length === 1) return Math.hypot(pts[0][0]-p[0], pts[0][1]-p[1]) <= r + s.width/2;
+  for (let i = 1; i < pts.length; i++) if (segDist(p, pts[i-1], pts[i]) <= r + s.width/2) return true;
+  return false;
+}
+function hitStroke(p, r){
+  for (let i = board.strokes.length-1; i >= 0; i--) if (strokeHit(board.strokes[i], p, r)) return board.strokes[i];
+  return null;
+}
+function clampRink([x,y]){ return [r2(Math.max(-99, Math.min(99, x))), r2(Math.max(-41.5, Math.min(41.5, y)))]; }
+
+/* ---------- Pointer interaction ---------- */
+let drag = null;   // active gesture
+let lpTimer = null;
+function overTrash(cx, cy){ const e = document.elementFromPoint(cx, cy); return !!(e && e.closest && e.closest('#btn-delete')); }
+
+svg.addEventListener('pointerdown', e => {
+  if (drag) return;                 // ignore second finger
+  if (e.button && e.button !== 0) return;
+  e.preventDefault();
+  closePicker();
+  try { svg.setPointerCapture(e.pointerId); } catch(_){}
+  const p = toRink(e.clientX, e.clientY);
+  const tool = settings.tool;
+  const before = snap();
+  drag = { id:e.pointerId, sx:e.clientX, sy:e.clientY, before, moved:false, tool };
+
+  if (tool === 'pen') {
+    if (!inView(p)) { drag.kind='none'; return; }
+    const s = { id:uid(), color:settings.penColor, width:WIDTHS[settings.penWidth], points:[[r2(p[0]),r2(p[1])]] };
+    board.strokes.push(s); drag.kind='draw'; drag.stroke=s; drag.path = strokeEl(s); strokeLayer.appendChild(drag.path);
+    return;
+  }
+  if (tool === 'eraser') { drag.kind='erase'; eraseAt(p); return; }
+  if (tool === 'delete') {
+    drag.kind = 'none';
+    const o = hitObject(p);
+    if (o) { board.objects = board.objects.filter(x => x !== o); renderObjects(); commit(before); toast('Deleted'); return; }
+    const s = hitStroke(p, 12/pxPerFt());
+    if (s) { board.strokes = board.strokes.filter(x => x !== s); renderStrokes(); commit(before); toast('Deleted stroke'); }
+    return;
+  }
+  // select / X / O / puck
+  let o = hitObject(p);
+  if (!o && (tool === 'X' || tool === 'O' || tool === 'puck') && inView(p)) {
+    const [x,y] = clampRink(p);
+    if (tool === 'puck') {
+      o = board.objects.find(q => q.type === 'puck');
+      if (o) { o.x = x; o.y = y; board.objects = board.objects.filter(q => q !== o).concat(o); }
+      else { o = { id:uid(), type:'puck', x, y }; board.objects.push(o); }
+    } else {
+      o = { id:uid(), type:'player', team:tool, color:TEAM_DEFAULT[tool], x, y };
+      board.objects.push(o);
+    }
+    drag.placed = true;
+  }
+  if (!o) { drag.kind = 'none'; return; }
+  drag.kind = 'move'; drag.obj = o; drag.off = [o.x - p[0], o.y - p[1]];
+  if (drag.placed) drag.off = [0,0];
+  // bring to front
+  board.objects = board.objects.filter(q => q !== o).concat(o);
+  renderObjects();
+  if (o.type === 'player' && !drag.placed) {
+    lpTimer = setTimeout(() => {
+      lpTimer = null;
+      if (drag && drag.obj === o && !drag.moved) { const d = drag; drag = null; try{svg.releasePointerCapture(d.id);}catch(_){} openPicker(o); }
+    }, LONG_PRESS_MS);
+  }
+});
+
+svg.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  e.preventDefault();
+  const far = Math.hypot(e.clientX-drag.sx, e.clientY-drag.sy) > MOVE_TOL_PX;
+  const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  if (drag.kind === 'draw') {
+    const minD = 1.5 / pxPerFt();
+    for (const ev of (evs.length ? evs : [e])) {
+      const p = toRink(ev.clientX, ev.clientY), pts = drag.stroke.points, l = pts[pts.length-1];
+      if (Math.hypot(p[0]-l[0], p[1]-l[1]) >= minD) pts.push([r2(p[0]), r2(p[1])]);
+    }
+    drag.path.setAttribute('d', strokeD(drag.stroke.points));
+    drag.moved = true;
+  } else if (drag.kind === 'erase') {
+    for (const ev of (evs.length ? evs : [e])) eraseAt(toRink(ev.clientX, ev.clientY));
+  } else if (drag.kind === 'move') {
+    if (!drag.moved && !far) return;
+    if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+    drag.moved = true;
+    const p = toRink(e.clientX, e.clientY);
+    const [x,y] = clampRink([p[0]+drag.off[0], p[1]+drag.off[1]]);
+    drag.obj.x = x; drag.obj.y = y;
+    const hot = overTrash(e.clientX, e.clientY);
+    $('btn-delete').classList.toggle('trash-hot', hot);
+    renderObjects();
+  }
+});
+
+function endGesture(e){
+  if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+  if (!drag || e.pointerId !== drag.id) return;
+  const d = drag; drag = null;
+  $('btn-delete').classList.remove('trash-hot');
+  if (d.kind === 'draw') { renderStrokes(); commit(d.before); }
+  else if (d.kind === 'erase') { commit(d.before); }
+  else if (d.kind === 'move') {
+    if (d.moved && e.type === 'pointerup' && overTrash(e.clientX, e.clientY)) {
+      board.objects = board.objects.filter(q => q !== d.obj); toast('Deleted');
+    }
+    renderObjects(); commit(d.before);
+  }
+}
+svg.addEventListener('pointerup', endGesture);
+svg.addEventListener('pointercancel', endGesture);
+
+function eraseAt(p){
+  const r = Math.max(1.2, 14/pxPerFt());
+  const before = board.strokes.length;
+  board.strokes = board.strokes.filter(s => !strokeHit(s, p, r));
+  if (board.strokes.length !== before) renderStrokes();
+}
+
+/* ---------- Color picker (long press on a player) ---------- */
+const picker = $('picker');
+let pickerFor = null;
+function openPicker(o){
+  pickerFor = o; picker.textContent = '';
+  for (const c of COLOR_ORDER) {
+    const b = document.createElement('button');
+    b.className = 'sw' + (o.color === c ? ' sel' : ''); b.style.background = COLORS[c]; b.dataset.color = c; b.title = c;
+    b.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const before = snap(); const t = board.objects.find(q => q.id === pickerFor.id);
+      if (t) { t.color = c; renderObjects(); commit(before); }
+      closePicker();
+    });
+    picker.appendChild(b);
+  }
+  picker.classList.add('show');
+  const [sx, sy] = toScreen(o.x, o.y), br = $('board').getBoundingClientRect();
+  const w = picker.offsetWidth, h = picker.offsetHeight;
+  let left = sx - br.left - w/2, top = sy - br.top - h - 28;
+  if (top < 4) top = sy - br.top + 28;
+  left = Math.max(4, Math.min(br.width - w - 4, left));
+  top = Math.max(4, Math.min(br.height - h - 4, top));
+  picker.style.left = left + 'px'; picker.style.top = top + 'px';
+  if (navigator.vibrate) try { navigator.vibrate(20); } catch(_){}
+}
+function closePicker(){ picker.classList.remove('show'); pickerFor = null; }
+document.addEventListener('pointerdown', e => { if (pickerFor && !picker.contains(e.target) && e.target !== svg && !svg.contains(e.target)) closePicker(); }, true);
+picker.addEventListener('pointerdown', e => e.stopPropagation());
+
+/* ---------- Pen options ---------- */
+function buildPenbar(){
+  const pb = $('penbar'); pb.textContent = '';
+  for (const c of COLOR_ORDER) {
+    const b = document.createElement('button');
+    b.className = 'sw' + (settings.penColor === c ? ' sel' : ''); b.style.background = COLORS[c]; b.title = 'Marker ' + c; b.dataset.color = c;
+    b.onclick = () => { settings.penColor = c; save(); buildPenbar(); };
+    pb.appendChild(b);
+  }
+  const dv = document.createElement('div'); dv.className = 'div'; pb.appendChild(dv);
+  WIDTHS.forEach((w, i) => {
+    const b = document.createElement('button');
+    b.className = 'wd' + (settings.penWidth === i ? ' sel' : ''); b.title = ['Thin','Medium','Thick'][i]; b.dataset.width = i;
+    const dot = document.createElement('i'); const s = [5,9,14][i]; dot.style.width = dot.style.height = s+'px'; b.appendChild(dot);
+    b.onclick = () => { settings.penWidth = i; save(); buildPenbar(); };
+    pb.appendChild(b);
+  });
+  pb.classList.toggle('show', settings.tool === 'pen');
+}
+
+/* ---------- Toolbar ---------- */
+function setTool(t){
+  settings.tool = t; save(); closePicker();
+  document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
+  buildPenbar();
+  svg.style.cursor = t === 'pen' ? 'crosshair' : t === 'eraser' ? 'cell' : 'default';
+}
+document.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+$('btn-undo').onclick = undo;
+$('btn-redo').onclick = redo;
+$('btn-view').onclick = () => { viewOverride = viewMode() === 'full' ? 'half' : 'full'; updateView(); };
+$('btn-end').onclick = () => { settings.end = settings.end === 'right' ? 'left' : 'right'; save(); updateView(); };
+$('btn-clear').onclick = () => {
+  if (!board.objects.length && !board.strokes.length) { toast('Board is already empty'); return; }
+  if (!confirm('Clear the whole board? (You can undo this.)')) return;
+  const before = snap(); board = emptyBoard(); renderStrokes(); renderObjects(); commit(before); toast('Board cleared');
+};
+function updateButtons(){ $('btn-undo').disabled = !undoStack.length; $('btn-redo').disabled = !redoStack.length; }
+let toastT;
+function toast(msg){ const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 1200); }
+
+/* ---------- Keyboard shortcuts (desktop) ---------- */
+document.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
+});
+
+/* ---------- No page scroll / zoom ---------- */
+['gesturestart','gesturechange','dblclick'].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive:false }));
+document.addEventListener('touchmove', e => e.preventDefault(), { passive:false });
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+/* ---------- Resize / orientation ---------- */
+function onResize(){
+  const p = isPortrait();
+  if (p !== lastPortrait) { lastPortrait = p; viewOverride = null; }   // auto again on orientation change
+  updateView();
+}
+window.addEventListener('resize', onResize);
+window.addEventListener('orientationchange', () => setTimeout(onResize, 50));
+
+/* ---------- Init ---------- */
+drawRink(); renderStrokes(); setTool(settings.tool); updateView(); updateButtons();
+
+// Small API for tests / future playbook features
+window.hockeyBoard = {
+  getBoard: () => JSON.parse(snap()),
+  getView: () => ({ mode:viewMode(), end:settings.end, rotation:curRot, portrait:isPortrait() }),
+  toScreen, toRink, undo, redo, setTool,
+  history: () => ({ undo:undoStack.length, redo:redoStack.length })
+};
+})();
+</script>
+</body>
+</html>
