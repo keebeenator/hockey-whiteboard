@@ -2,6 +2,7 @@
 
 A single-file, mobile-first interactive ice hockey whiteboard: **https://keebeenator.github.io/hockey-whiteboard/**
 
+- Banana Blades logo at center ice, embedded as a WebP data URI. It sits under the rink lines and everything on the board, stays upright in every view, and shows as a half logo in half-rink view.
 - NHL rink drawn to scale (200 × 85 ft, 28 ft corners, blue/red/goal lines, creases, nets, faceoff circles and dots, referee crease).
 - Landscape shows the full rink. Portrait shows a half rink turned vertically with the net at the top. **Full/Half** switches views manually, and **Other end** picks which half you see.
 - Tools: Move, X / O players, Puck, Marker (5 colors, 3 widths), Eraser, Delete (tap an item, or drag an item onto the Delete button), Undo / Redo, Clear all.
@@ -11,3 +12,7 @@ A single-file, mobile-first interactive ice hockey whiteboard: **https://keebeen
 | Landscape | Portrait | Colors | Drawing |
 |---|---|---|---|
 | ![](screenshot-landscape.png) | ![](screenshot-portrait.png) | ![](screenshot-colors.png) | ![](screenshot-drawing.png) |
+
+| Logo, full rink | Logo, half rink |
+|---|---|
+| ![](screenshot-logo-landscape.png) | ![](screenshot-logo-portrait.png) |
